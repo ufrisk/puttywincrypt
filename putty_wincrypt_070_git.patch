@@ -1,0 +1,895 @@
+diff -crNB putty-orig/Recipe putty-patch2/Recipe
+*** putty-orig/Recipe	Tue Apr  3 13:55:36 2018
+--- putty-patch2/Recipe	Tue Apr  3 21:12:33 2018
+***************
+*** 145,151 ****
+  !end
+  
+  !begin vc vars
+! CFLAGS = $(CFLAGS) /DHAS_GSSAPI
+  !end
+  
+  !begin clangcl vars
+--- 145,151 ----
+  !end
+  
+  !begin vc vars
+! CFLAGS = $(CFLAGS) /DHAS_GSSAPI /DUSE_CAPI
+  !end
+  
+  !begin clangcl vars
+***************
+*** 220,226 ****
+  # _WIN32_IE is required to expose identifiers that only make sense on
+  # systems with IE5+ installed, such as some arguments to SHGetFolderPath().
+  # WINVER etc perform a similar function for FlashWindowEx().
+! CFLAGS += -D_WIN32_IE=0x0500
+  CFLAGS += -DWINVER=0x0500 -D_WIN32_WINDOWS=0x0410 -D_WIN32_WINNT=0x0500
+  !end
+  
+--- 220,226 ----
+  # _WIN32_IE is required to expose identifiers that only make sense on
+  # systems with IE5+ installed, such as some arguments to SHGetFolderPath().
+  # WINVER etc perform a similar function for FlashWindowEx().
+! CFLAGS += -D_WIN32_IE=0x0500 -DUSE_CAPI
+  CFLAGS += -DWINVER=0x0500 -D_WIN32_WINDOWS=0x0410 -D_WIN32_WINNT=0x0500
+  !end
+  
+***************
+*** 252,258 ****
+           + sshaes sshccp sshsh256 sshsh512 sshbn wildcard pinger ssharcf
+           + sshgssc pgssapi sshshare sshecc aqsync
+  WINSSH   = SSH winnoise wincapi winpgntc wingss winshare winnps winnpc
+!          + winhsock errsock
+  UXSSH    = SSH uxnoise uxagentc uxgss uxshare
+  
+  # SFTP implementation (pscp, psftp).
+--- 252,258 ----
+           + sshaes sshccp sshsh256 sshsh512 sshbn wildcard pinger ssharcf
+           + sshgssc pgssapi sshshare sshecc aqsync
+  WINSSH   = SSH winnoise wincapi winpgntc wingss winshare winnps winnpc
+!          + winhsock errsock wincrypto
+  UXSSH    = SSH uxnoise uxagentc uxgss uxshare
+  
+  # SFTP implementation (pscp, psftp).
+***************
+*** 274,280 ****
+  
+  # Standard libraries.
+  LIBS     = advapi32.lib user32.lib gdi32.lib comdlg32.lib
+!          + shell32.lib imm32.lib ole32.lib
+  
+  # Network backend sets. This also brings in the relevant attachment
+  # to proxy.c depending on whether we're crypto-avoidant or not.
+--- 274,280 ----
+  
+  # Standard libraries.
+  LIBS     = advapi32.lib user32.lib gdi32.lib comdlg32.lib
+!          + shell32.lib imm32.lib ole32.lib crypt32.lib
+  
+  # Network backend sets. This also brings in the relevant attachment
+  # to proxy.c depending on whether we're crypto-avoidant or not.
+***************
+*** 306,318 ****
+  
+  pageant  : [G] winpgnt pageant sshrsa sshpubk sshdes sshbn sshmd5 version
+  	 + tree234 misc sshaes sshsha winsecur winpgntc aqsync sshdss sshsh256
+! 	 + sshsh512 winutils sshecc winmisc winhelp conf pageant.res LIBS
+  
+  puttygen : [G] winpgen sshrsag sshdssg sshprime sshdes sshbn sshmd5 version
+           + sshrand winnoise sshsha winstore misc winctrls sshrsa sshdss winmisc
+           + sshpubk sshaes sshsh256 sshsh512 IMPORT winutils puttygen.res
+           + tree234 notiming winhelp winnojmp conf LIBS wintime sshecc
+!          + sshecdsag winsecur
+  
+  pterm    : [X] GTKTERM uxmisc misc ldisc settings uxpty uxsel BE_NONE uxstore
+           + uxsignal CHARSET cmdline uxpterm version time xpmpterm xpmptcfg
+--- 306,318 ----
+  
+  pageant  : [G] winpgnt pageant sshrsa sshpubk sshdes sshbn sshmd5 version
+  	 + tree234 misc sshaes sshsha winsecur winpgntc aqsync sshdss sshsh256
+! 	 + sshsh512 winutils wincrypto sshecc winmisc winhelp conf pageant.res LIBS
+  
+  puttygen : [G] winpgen sshrsag sshdssg sshprime sshdes sshbn sshmd5 version
+           + sshrand winnoise sshsha winstore misc winctrls sshrsa sshdss winmisc
+           + sshpubk sshaes sshsh256 sshsh512 IMPORT winutils puttygen.res
+           + tree234 notiming winhelp winnojmp conf LIBS wintime sshecc
+!          + sshecdsag winsecur wincrypto
+  
+  pterm    : [X] GTKTERM uxmisc misc ldisc settings uxpty uxsel BE_NONE uxstore
+           + uxsignal CHARSET cmdline uxpterm version time xpmpterm xpmptcfg
+diff -crNB putty-orig/pageant.c putty-patch2/pageant.c
+*** putty-orig/pageant.c	Tue Apr  3 13:52:39 2018
+--- putty-patch2/pageant.c	Tue Apr  3 21:17:03 2018
+***************
+*** 1293,1300 ****
+--- 1293,1315 ----
+  	    keylist = pageant_get_keylist1(&keylistlen);
+  	} else {
+  	    unsigned char *blob2;
++ #ifdef USE_CAPI
++ 		if(0 == strncmp("cert://", filename->path, 7)) {
++ 			blob = ssh2_userkey_loadpub(filename, NULL, &bloblen,
++ 				&comment, &error);
++ 			if(blob) {
++ 				sfree(filename->path);
++ 				filename->path = comment;
++ 				comment = NULL;
++ 			}
++ 		}
++ 		else {
++ #endif /* USE_CAPI */
+  	    blob = ssh2_userkey_loadpub(filename, NULL, &bloblen,
+  					NULL, &error);
++ #ifdef USE_CAPI
++ 		}
++ #endif /* USE_CAPI */
+  	    if (!blob) {
+                  *retstr = dupprintf("Couldn't load private key (%s)", error);
+  		return PAGEANT_ACTION_FAILURE;
+diff -crNB putty-orig/ssh.c putty-patch2/ssh.c
+*** putty-orig/ssh.c	Tue Apr  3 13:55:36 2018
+--- putty-patch2/ssh.c	Tue Apr  3 21:18:13 2018
+***************
+*** 4445,4450 ****
+--- 4445,4456 ----
+                      logeventf(ssh, "Key file contains public key only");
+  		s->privatekey_encrypted = rsakey_encrypted(s->keyfile,
+                                                             NULL);
++ #ifdef USE_CAPI
++ 		if(s->publickey_comment && 0 == strncmp("cert://", s->publickey_comment, 7)) {
++ 			sfree(s->keyfile->path);
++ 			s->keyfile->path = strdup(s->publickey_comment);
++ 		}
++ #endif /* USE_CAPI */
+  	    } else {
+  		char *msgbuf;
+  		logeventf(ssh, "Unable to load key (%s)", error);
+***************
+*** 9372,9377 ****
+--- 9378,9389 ----
+                          logeventf(ssh, "Key file contains public key only");
+  		    s->privatekey_encrypted =
+  			ssh2_userkey_encrypted(s->keyfile, NULL);
++ #ifdef USE_CAPI
++ 			if(s->publickey_comment && 0 == strncmp("cert://", s->publickey_comment, 7)) {
++ 				sfree(s->keyfile->path);
++ 				s->keyfile->path = strdup(s->publickey_comment);
++ 			}
++ #endif /* USE_CAPI */
+  		} else {
+  		    char *msgbuf;
+  		    logeventf(ssh, "Unable to load key (%s)", 
+diff -crNB putty-orig/sshpubk.c putty-patch2/sshpubk.c
+*** putty-orig/sshpubk.c	Tue Apr  3 13:52:39 2018
+--- putty-patch2/sshpubk.c	Tue Apr  3 21:18:43 2018
+***************
+*** 649,654 ****
+--- 649,672 ----
+      int passlen = passphrase ? strlen(passphrase) : 0;
+      const char *error = NULL;
+  
++ #ifdef USE_CAPI
++ 	if(0 == strncmp("cert://", filename->path, 7)) {
++ 		alg = find_pubkey_alg("ssh-rsa");
++ 		ret = snew(struct ssh2_userkey);
++ 		ret->alg = alg;
++ 		public_blob_len = strlen(filename->path);
++ 		public_blob = (unsigned char*)filename->path;
++ 		ret->data = alg->openssh_createkey(alg, &public_blob, &public_blob_len);
++ 		if(!ret->data) {
++ 			sfree(ret);
++ 			error = "load key from certificate failed";
++ 			return NULL;
++ 		}
++ 		ret->comment = dupstr((((struct RSAKey*)ret->data)->comment) ?
++ 			(((struct RSAKey*)ret->data)->comment) : "");
++ 		return ret;
++ 	}
++ #endif /* USE_CAPI */	
+      ret = NULL;			       /* return NULL for most errors */
+      encryption = comment = mac = NULL;
+      public_blob = private_blob = NULL;
+***************
+*** 1117,1123 ****
+      const char *error = NULL;
+      char *comment = NULL;
+  
+!     public_blob = NULL;
+  
+      fp = f_open(filename, "rb", FALSE);
+      if (!fp) {
+--- 1135,1159 ----
+      const char *error = NULL;
+      char *comment = NULL;
+  
+! #ifdef USE_CAPI
+! 	struct RSAKey *key;
+! 	if(0 == strncmp("cert://", filename->path, 7)) {
+! 		alg = find_pubkey_alg("ssh-rsa");
+! 		if(algorithm) { *algorithm = dupstr(alg->name); }
+! 		public_blob_len = strlen(filename->path);
+! 		public_blob = (unsigned char*)filename->path;
+! 		key = (struct RSAKey*)alg->openssh_createkey(alg, &public_blob, &public_blob_len);
+! 		if(!key) {
+! 			*errorstr = "load key from certificate failed";
+! 			return NULL;
+! 		}
+! 		if(commentptr) { *commentptr = dupstr(key->comment); }
+! 		public_blob = alg->public_blob(key, pub_blob_len);
+! 		alg->freekey(key);
+! 		return public_blob;
+! 	}
+! #endif /* USE_CAPI */
+! 	public_blob = NULL;
+  
+      fp = f_open(filename, "rb", FALSE);
+      if (!fp) {
+***************
+*** 1642,1648 ****
+      int i;
+      char *p;
+  
+!     i = fread(buf, 1, sizeof(buf)-1, fp);
+      rewind(fp);
+  
+      if (i < 0)
+--- 1678,1684 ----
+      int i;
+      char *p;
+  
+! 	i = fread(buf, 1, sizeof(buf)-1, fp);
+      rewind(fp);
+  
+      if (i < 0)
+***************
+*** 1680,1686 ****
+      FILE *fp;
+      int ret;
+  
+!     fp = f_open(filename, "r", FALSE);
+      if (!fp)
+  	return SSH_KEYTYPE_UNOPENABLE;
+      ret = key_type_fp(fp);
+--- 1716,1727 ----
+      FILE *fp;
+      int ret;
+  
+! #ifdef USE_CAPI
+! 	if(0 == strncmp("cert://", filename->path, 7)) {
+! 		return SSH_KEYTYPE_SSH2;
+! 	}
+! #endif /* USE_CAPI */
+! 	fp = f_open(filename, "r", FALSE);
+      if (!fp)
+  	return SSH_KEYTYPE_UNOPENABLE;
+      ret = key_type_fp(fp);
+diff -crNB putty-orig/sshrsa.c putty-patch2/sshrsa.c
+*** putty-orig/sshrsa.c	Tue Apr  3 13:52:39 2018
+--- putty-patch2/sshrsa.c	Tue Apr  3 21:17:54 2018
+***************
+*** 10,15 ****
+--- 10,21 ----
+  #include "ssh.h"
+  #include "misc.h"
+  
++ #ifdef USE_CAPI
++ #ifdef _WINDOWS
++ #include "wincrypto.h"
++ #endif /* _WINDOWS */
++ #endif /* USE_CAPI */
++ 
+  int makekey(const unsigned char *data, int len, struct RSAKey *result,
+  	    const unsigned char **keystr, int order)
+  {
+***************
+*** 411,416 ****
+--- 417,429 ----
+      Bignum n, ed, pm1, qm1;
+      int cmp;
+  
++ #ifdef USE_CAPI
++ #ifdef _WINDOWS
++ 	if(capi_is_capikey(key)) {
++ 		return 1;
++ 	}
++ #endif /* _WINDOWS */
++ #endif /* USE_CAPI */
+      /* n must equal pq. */
+      n = bigmul(key->p, key->q);
+      cmp = bignum_cmp(n, key->modulus);
+***************
+*** 713,718 ****
+--- 726,738 ----
+      const char **b = (const char **) blob;
+      struct RSAKey *rsa;
+  
++ #ifdef USE_CAPI
++ #ifdef _WINDOWS
++ 	if((*len >= 7) && 0 == strncmp("cert://", (const char*)*blob, 7)) {
++ 		return capi_load_key(blob, len);
++ 	}
++ #endif /* _WINDOWS */
++ #endif /* USE_CAPI */
+      rsa = snew(struct RSAKey);
+      rsa->comment = NULL;
+  
+***************
+*** 872,877 ****
+--- 892,904 ----
+      Bignum in, out;
+      int i, j;
+  
++ #ifdef USE_CAPI
++ #ifdef _WINDOWS
++ 	if(capi_is_capikey(rsa)) {
++ 		out = capi_rsa2_sign(rsa, data, datalen);
++ 	} else {
++ #endif /* _WINDOWS */
++ #endif /* USE_CAPI */
+      SHA_Simple(data, datalen, hash);
+  
+      nbytes = (bignum_bitcount(rsa->modulus) - 1) / 8;
+***************
+*** 891,896 ****
+--- 918,928 ----
+  
+      out = rsa_privkey_op(in, rsa);
+      freebn(in);
++ #ifdef USE_CAPI
++ #ifdef _WINDOWS
++ 	}
++ #endif /* _WINDOWS */
++ #endif /* USE_CAPI */
+  
+      nbytes = (bignum_bitcount(out) + 7) / 8;
+      bytes = snewn(4 + 7 + 4 + nbytes, unsigned char);
+diff -crNB putty-orig/windows/wincrypto.c putty-patch2/windows/wincrypto.c
+*** putty-orig/windows/wincrypto.c	Thu Jan  1 00:00:00 1970
+--- putty-patch2/windows/wincrypto.c	Tue Apr  3 20:54:04 2018
+***************
+*** 0 ****
+--- 1,393 ----
++ #ifdef USE_CAPI
++ /*
++  * PuTTY wincrypt patch main file.
++  * Author: Ulf Frisk, puttywincrypt@ulffrisk.com
++  */
++ #include <windows.h>
++ #include <wincrypt.h>
++ #include "ssh.h"
++ 
++ /*
++  * Defines and declarations due to missing declarations in mingw32 and BCC55 headers.
++  */
++ #ifndef CERT_SYSTEM_STORE_CURRENT_USER
++ #define CERT_SYSTEM_STORE_CURRENT_USER (1 << 16)
++ #endif /* CERT_SYSTEM_STORE_CURRENT_USER */
++ 
++ #ifndef CERT_STORE_PROV_MEMORY
++ #define CERT_STORE_PROV_MEMORY ((LPCSTR) 2)
++ #endif /* CERT_STORE_PROV_MEMORY */
++ 
++ #ifndef CRYPT_FIND_USER_KEYSET_FLAG
++ #define CRYPT_FIND_USER_KEYSET_FLAG 0x00000001
++ #endif /* CRYPT_FIND_USER_KEYSET_FLAG */
++ 
++ #ifndef CRYPT_FIND_SILENT_KEYSET_FLAG
++ #define CRYPT_FIND_SILENT_KEYSET_FLAG 0x00000040
++ #endif /* CRYPT_FIND_SILENT_KEYSET_FLAG */
++ 
++ #ifndef CERT_CLOSE_STORE_FORCE_FLAG
++ #define CERT_CLOSE_STORE_FORCE_FLAG 0x00000001
++ #endif /* CERT_CLOSE_STORE_FORCE_FLAG */
++ 
++ #ifndef CRYPT_ACQUIRE_NO_HEALING
++ #define CRYPT_ACQUIRE_NO_HEALING 0x00000008
++ #endif /* CRYPT_ACQUIRE_NO_HEALING */
++ 
++ #ifndef CRYPT_ACQUIRE_ALLOW_NCRYPT_KEY_FLAG
++ #define CRYPT_ACQUIRE_ALLOW_NCRYPT_KEY_FLAG 0x00010000
++ #endif /* CRYPT_ACQUIRE_ALLOW_NCRYPT_KEY_FLAG */
++ 
++ #ifndef CERT_NCRYPT_KEY_SPEC
++ #define CERT_NCRYPT_KEY_SPEC 0xFFFFFFFF
++ #endif /* CERT_NCRYPT_KEY_SPEC */
++ 
++ typedef ULONG_PTR HCRYPTPROV_OR_NCRYPT_KEY_HANDLE;
++ 
++ #ifndef __BCRYPT_H__
++ #define BCRYPT_PAD_PKCS1 0x00000002
++ #define BCRYPT_SHA1_ALGORITHM L"SHA1"
++ typedef struct _BCRYPT_PKCS1_PADDING_INFO
++ {
++ 	LPCWSTR pszAlgId;
++ } BCRYPT_PKCS1_PADDING_INFO;
++ #endif /* __BCRYPT_H__ */
++ 
++ #ifndef CRYPT_ACQUIRE_SILENT_FLAG
++ #define CRYPT_ACQUIRE_SILENT_FLAG 0x00000040
++ #endif /* CRYPT_ACQUIRE_SILENT_FLAG */
++ 
++ typedef PCCERT_CONTEXT(WINAPI *DFNCryptUIDlgSelectCertificateFromStore)(HCERTSTORE, HWND, LPCWSTR, LPCWSTR, DWORD, DWORD, PVOID);
++ 
++ /*
++  * Dynamically lookup NCryptSignHash to avoid link dependency to ncrypt.dll (not supported by Windows XP).
++  */
++ typedef LONG(WINAPI *DFNNCryptSignHash)(ULONG_PTR, PVOID, PBYTE, DWORD, PBYTE, DWORD, PDWORD, DWORD);
++ 
++ /*
++  * convert sha1 string to binary data
++  */
++ void capi_sha1_to_binary(PSTR szHex, PBYTE pbBin)
++ {
++ 	unsigned char i, h, l;
++ 	for(i = 0; i < 20; i++) {
++ 		h = szHex[i<<1];
++ 		l = szHex[(i<<1) + 1];
++ 		pbBin[i] = 
++ 			(((h >= '0' && h <= '9') ? h - '0' : ((h >= 'a' && h <= 'f') ? h - 'a' + 10 : ((h >= 'A' && h <= 'F') ? h - 'A' + 10 : 0))) << 4) + 
++ 			(((l >= '0' && l <= '9') ? l - '0' : ((l >= 'a' && l <= 'f') ? l - 'a' + 10 : ((l >= 'A' && l <= 'F') ? l - 'A' + 10 : 0))));
++ 	}
++ }
++ 
++ /*
++  * Windows XP do not support CryptBinaryToString with raw hex.
++  */
++ PSTR capi_binary_to_hex(PBYTE pbBinary, DWORD cbBinary)
++ {
++ 	PSTR szHex;
++ 	DWORD idx;
++ 	BYTE b;
++ 	szHex = snewn((cbBinary << 1) + 1, char);
++ 	szHex[cbBinary << 1] = 0;
++ 	for(idx = 0; idx < cbBinary; idx++) {
++ 		b = (pbBinary[idx] >> 4) & 0x0F;
++ 		szHex[idx << 1] = (b < 10)?b+'0':b-10+'a';
++ 		b = pbBinary[idx] & 0x0F;
++ 		szHex[(idx << 1) + 1] = (b < 10)?b+'0':b-10+'a';
++ 	}
++ 	return szHex;
++ }
++ 
++ /*
++  * Reverse a byte array.
++  */
++ void capi_reverse_array(PBYTE pb, DWORD cb)
++ {
++ 	DWORD i;
++ 	BYTE t;
++ 	for(i = 0; i < cb >> 1; i++) {
++ 		t = pb[i];
++ 		pb[i] = pb[cb-i-1];
++ 		pb[cb-i-1] = t;
++ 	}
++ }
++ 
++ /*
++  * Select a certificate given the criteria provided.
++  * If a criterion is absent it will be disregarded.
++  */
++ void capi_select_cert_2(PBYTE pbSHA1, LPWSTR wszCN, PCCERT_CONTEXT *ppCertCtx, HCERTSTORE *phStore)
++ {
++ 	HCERTSTORE hStoreMY = NULL, hStoreTMP = NULL;
++ 	PCCERT_CONTEXT pCertCtx = NULL;
++ 	HMODULE hCryptUIDLL = NULL;
++ 	DFNCryptUIDlgSelectCertificateFromStore dfnCryptUIDlgSelectCertificateFromStore;
++ 	CRYPT_HASH_BLOB cryptHashBlob;
++ 	HCRYPTPROV_OR_NCRYPT_KEY_HANDLE hCryptProvOrNCryptKey;
++ 	DWORD dwCertCount = 0, dwKeySpec;
++ 	BOOL fCallerFreeProvAlwaysFalse;
++ 	if (!(hStoreMY = CertOpenStore(CERT_STORE_PROV_SYSTEM, 0, 0, CERT_SYSTEM_STORE_CURRENT_USER, L"MY"))) {
++ 		goto error;
++ 	}
++ 	if (pbSHA1) {
++ 		cryptHashBlob.cbData = 20;
++ 		cryptHashBlob.pbData = pbSHA1;
++ 		if ((*ppCertCtx = CertFindCertificateInStore(hStoreMY, X509_ASN_ENCODING, 0, CERT_FIND_SHA1_HASH, &cryptHashBlob, pCertCtx))) {
++ 			*phStore = hStoreMY;
++ 			return;
++ 		}
++ 		else {
++ 			goto error;
++ 		}
++ 	}
++ 	if (!(hStoreTMP = CertOpenStore(CERT_STORE_PROV_MEMORY, 0, 0, 0, NULL))) {
++ 		goto error;
++ 	}
++ 	while (TRUE) {
++ 		if (wszCN) {
++ 			pCertCtx = CertFindCertificateInStore(hStoreMY, X509_ASN_ENCODING, 0, CERT_FIND_SUBJECT_STR, wszCN, pCertCtx);
++ 		}
++ 		else {
++ 			pCertCtx = CertEnumCertificatesInStore(hStoreMY, pCertCtx);
++ 		}
++ 		if (!pCertCtx) {
++ 			break;
++ 		}
++ 		if (!CryptAcquireCertificatePrivateKey(pCertCtx, CRYPT_ACQUIRE_CACHE_FLAG | CRYPT_ACQUIRE_NO_HEALING | CRYPT_ACQUIRE_SILENT_FLAG | CRYPT_ACQUIRE_ALLOW_NCRYPT_KEY_FLAG, NULL, &hCryptProvOrNCryptKey, &dwKeySpec, &fCallerFreeProvAlwaysFalse)) {
++ 			continue;
++ 		}
++ 		dwCertCount++;
++ 		CertAddCertificateContextToStore(hStoreTMP, pCertCtx, CERT_STORE_ADD_ALWAYS, NULL);
++ 	}
++ 	CertCloseStore(hStoreMY, CERT_CLOSE_STORE_FORCE_FLAG);
++ 	hStoreMY = NULL;
++ 	if (dwCertCount == 1) {
++ 		*ppCertCtx = CertEnumCertificatesInStore(hStoreTMP, NULL);
++ 		*phStore = hStoreTMP;
++ 		return;
++ 	} else if ((dwCertCount > 1) &&
++ 		(hCryptUIDLL = LoadLibrary("cryptui.dll")) &&
++ 		(dfnCryptUIDlgSelectCertificateFromStore = (DFNCryptUIDlgSelectCertificateFromStore)GetProcAddress(hCryptUIDLL, "CryptUIDlgSelectCertificateFromStore")) &&
++ 		(*ppCertCtx = dfnCryptUIDlgSelectCertificateFromStore(hStoreTMP, NULL, NULL, NULL, 0, 0, NULL))) {
++ 		*phStore = hStoreTMP;
++ 		FreeLibrary(hCryptUIDLL);
++ 		return;
++ 	}
++ error:
++ 	if (hCryptUIDLL) { FreeLibrary(hCryptUIDLL); }
++ 	if (hStoreTMP)	{ CertCloseStore(hStoreTMP, CERT_CLOSE_STORE_FORCE_FLAG); }
++ 	if (hStoreMY)	{ CertCloseStore(hStoreMY, CERT_CLOSE_STORE_FORCE_FLAG); }
++ 	*ppCertCtx = NULL;
++ 	*phStore = NULL;
++ }
++ 
++ /*
++  * Return a malloc'ed string containing the requested subitem.
++  */
++ PSTR capi_select_cert_finditem(PSTR szCert, PCSTR szStart)
++ {
++ 	PSTR ptrStart, ptrEnd, szResult;
++ 	ptrStart = strstr(szCert, szStart);
++ 	ptrEnd = strstr(szCert, ",");
++ 	if(!ptrEnd || ptrEnd < ptrStart) {
++ 		ptrEnd = szCert + strlen(szCert);
++ 	}
++ 	if(!ptrStart || ptrStart > ptrEnd) {
++ 		return NULL;
++ 	}
++ 	ptrStart += strlen(szStart);
++ 	szResult = (PSTR)calloc(ptrEnd - ptrStart + 1, sizeof(char));
++ 	memcpy(szResult, ptrStart, ptrEnd - ptrStart);
++ 	return szResult;
++ }
++ 
++ /*
++  * Select a certificate given the definition string.
++  */
++ void capi_select_cert(PSTR szCert, PCCERT_CONTEXT *ppCertCtx, HCERTSTORE *phStore)
++ {
++ 	PSTR szCN = NULL, szThumb, ptrStart, ptrStartAll;
++ 	LPWSTR wszCN = NULL;
++ 	DWORD i, len;
++ 	PBYTE pbThumb = snewn(20, BYTE);
++ 	ptrStart = strstr(szCert, "cert://");
++ 	ptrStartAll = strstr(szCert, "cert://*");
++ 	if(ptrStart != szCert) {
++ 		*ppCertCtx = NULL;
++ 		*phStore = NULL;
++ 		return;
++ 	}
++ 	if(ptrStartAll) {
++ 		capi_select_cert_2(NULL, NULL, ppCertCtx, phStore);
++ 		return;
++ 	}
++ 	szThumb = capi_select_cert_finditem(szCert, "thumbprint=");
++ 	if(szThumb && 40 == strlen(szThumb)) {
++ 		capi_sha1_to_binary(szThumb, pbThumb);
++ 		capi_select_cert_2(pbThumb, NULL, ppCertCtx, phStore);
++ 	} else {
++ 		szCN = capi_select_cert_finditem(szCert, "cn=");
++ 		if(szCN) {
++ 			len = strlen(szCN);
++ 			wszCN = (LPWSTR)calloc(len + 1, sizeof(wchar_t));
++ 			for(i = 0; i < len; i++) {
++ 				wszCN[i] = szCN[i];
++ 			}
++ 		}
++ 		capi_select_cert_2(NULL, wszCN, ppCertCtx, phStore);
++ 	}
++ 	if(szCN) { free(szCN); }
++ 	if(wszCN) { free(wszCN); }
++ 	sfree(pbThumb);
++ }
++ 
++ /* 
++  * Get rsa key comment on the form "cert://cn=<cn>,thumbprint=<sha1>".
++  */
++ static PSTR capi_get_description(PCCERT_CONTEXT pCertContext)
++ {
++ 	unsigned int cbCN;
++ 	PSTR szCN, szSHA1, szResult;
++ 	unsigned char hash[20];
++ 	cbCN = CertGetNameStringA(pCertContext, CERT_NAME_ATTR_TYPE, 0, szOID_COMMON_NAME, szCN = snewn(FILENAME_MAX, char), FILENAME_MAX);
++ 	SHA_Simple(pCertContext->pbCertEncoded, pCertContext->cbCertEncoded, hash);
++ 	szSHA1 = capi_binary_to_hex(hash, 20);
++ 	szResult = ((cbCN > 0) && (cbCN < FILENAME_MAX - 64)) ? 
++ 		dupcat("cert://cn=", szCN, ",thumbprint=", szSHA1, NULL) : 
++ 		dupcat("cert://thumbprint=", szSHA1, NULL);
++ 	sfree(szCN);
++ 	sfree(szSHA1);
++ 	return szResult;
++ }
++ 
++ /*
++  * Load a rsa key from a certificate in windows certificate personal store.
++  */
++ void *capi_load_key(unsigned char **blob, int *len) 
++ {
++ 	BOOL result;
++ 	PCCERT_CONTEXT pCertContext;
++ 	HCERTSTORE hCertStore;
++ 	DWORD cbPublicKeyBlob = 8192;
++ 	PBYTE pbPublicKeyBlob = NULL;
++ 	RSAPUBKEY *pRSAPubKey;
++     struct RSAKey *rsa;
++ 	/* instantiate certificate and retrieve public key blob */
++ 	if((*len < 7) || 0 != strncmp("cert://", (PSTR)*blob, 7)) {
++ 		return NULL;
++ 	}
++ 	capi_select_cert((PSTR)*blob, &pCertContext, &hCertStore);
++ 	if(!pCertContext) {
++ 		return NULL;
++ 	}
++ 	result = CryptDecodeObject(
++ 		X509_ASN_ENCODING, 
++ 		RSA_CSP_PUBLICKEYBLOB, 
++ 		pCertContext->pCertInfo->SubjectPublicKeyInfo.PublicKey.pbData, 
++ 		pCertContext->pCertInfo->SubjectPublicKeyInfo.PublicKey.cbData, 
++ 		0, 
++ 		(void*)(pbPublicKeyBlob = snewn(cbPublicKeyBlob, BYTE)),
++ 		&cbPublicKeyBlob);
++ 	if(!result) {
++ 		CertFreeCertificateContext(pCertContext);
++ 		sfree(pbPublicKeyBlob);
++ 		return NULL;
++ 	}
++ 	pRSAPubKey = (RSAPUBKEY*)(pbPublicKeyBlob + sizeof(BLOBHEADER));
++ 	/* create rsa key, set properties [no need for private_exponent,p,q,iqmp] */
++ 	rsa = snew(struct RSAKey);
++ 	rsa->bits = pRSAPubKey->bitlen;
++ 	rsa->bytes = pRSAPubKey->bitlen / 8;
++ 	rsa->exponent = bignum_from_long(pRSAPubKey->pubexp);
++ 	capi_reverse_array(pbPublicKeyBlob + sizeof(BLOBHEADER) + sizeof(RSAPUBKEY), pRSAPubKey->bitlen / 8);
++ 	rsa->modulus = bignum_from_bytes((unsigned char*)pbPublicKeyBlob + sizeof(BLOBHEADER) + sizeof(RSAPUBKEY), pRSAPubKey->bitlen / 8);
++ 	rsa->comment = capi_get_description(pCertContext);
++     rsa->private_exponent = bignum_from_long(0);
++     rsa->p = bignum_from_long(0);
++     rsa->q = bignum_from_long(0);
++     rsa->iqmp = bignum_from_long(0);
++ 	/* cleanup */
++ 	sfree(pbPublicKeyBlob);
++ 	CertFreeCertificateContext(pCertContext);
++ 	CertCloseStore(hCertStore, CERT_CLOSE_STORE_FORCE_FLAG);
++     return rsa;
++ }
++ 
++ /*
++  * Check whether the supplied key is a capi key or not.
++  */
++ BOOL capi_is_capikey(struct RSAKey *rsa)
++ {
++ 	return
++ 		0 == bignum_bitcount(rsa->p) &&
++ 		0 == bignum_bitcount(rsa->q) &&
++ 		0 == bignum_bitcount(rsa->iqmp) &&
++ 		0 == bignum_bitcount(rsa->private_exponent) &&
++ 		NULL != rsa->comment &&
++ 		NULL != strstr(rsa->comment, "cert://");
++ }
++ 
++ /*
++  * Perform the signing operation.
++  */
++ Bignum capi_rsa2_sign_2(struct RSAKey *rsa, char *data, int datalen, BOOL isSilent)
++ {
++ 	Bignum ret = NULL;
++ 	HCERTSTORE hCertStore;
++ 	PCCERT_CONTEXT pCertCtx;
++ 	HCRYPTPROV_OR_NCRYPT_KEY_HANDLE hCryptProvOrNCryptKey = 0;
++ 	HCRYPTHASH hHash = 0;
++ 	PBYTE pbSig = NULL;
++ 	DWORD dwSpec, cbSig = 0;
++ 	BOOL fCallerFreeProvAlwaysFalse = TRUE;
++ 	HMODULE hNCryptDLL = NULL;
++ 	DFNNCryptSignHash dfnNCryptSignHash;
++ 	LONG win32ret;
++ 	BYTE bHash[20];
++ 	BCRYPT_PKCS1_PADDING_INFO padInfo;
++ 	/* perform the signing operation (terminate on any error) */
++ 	capi_select_cert(rsa->comment, &pCertCtx, &hCertStore);
++ 	if (pCertCtx && CryptAcquireCertificatePrivateKey(pCertCtx, CRYPT_ACQUIRE_CACHE_FLAG | CRYPT_ACQUIRE_ALLOW_NCRYPT_KEY_FLAG | (isSilent ? CRYPT_ACQUIRE_SILENT_FLAG : 0), 0, &hCryptProvOrNCryptKey, &dwSpec, &fCallerFreeProvAlwaysFalse)) {
++ 		if (dwSpec == AT_KEYEXCHANGE || dwSpec == AT_SIGNATURE) {
++ 			/* CSP implementation */
++ 			if (CryptCreateHash((HCRYPTPROV)hCryptProvOrNCryptKey, CALG_SHA1, 0, 0, &hHash) &&
++ 				CryptHashData(hHash, (PBYTE)data, datalen, 0) &&
++ 				CryptSignHash(hHash, dwSpec, NULL, 0, NULL, &cbSig) &&
++ 				CryptSignHash(hHash, dwSpec, NULL, 0, pbSig = snewn(cbSig, BYTE), &cbSig)) {
++ 				capi_reverse_array(pbSig, cbSig);
++ 				ret = bignum_from_bytes(pbSig, cbSig);
++ 			} else if (isSilent && NTE_SILENT_CONTEXT == GetLastError()) {
++ 				CryptSetProvParam((HCRYPTPROV)hCryptProvOrNCryptKey, PP_KEYEXCHANGE_PIN, NULL, 0);
++ 				CryptSetProvParam((HCRYPTPROV)hCryptProvOrNCryptKey, PP_SIGNATURE_PIN, NULL, 0);
++ 				ret = capi_rsa2_sign_2(rsa, data, datalen, FALSE);
++ 			}
++ 		} else if (dwSpec == CERT_NCRYPT_KEY_SPEC) {
++ 			/* KSP/CNG implementation */
++ 			SHA_Simple(data, datalen, bHash);
++ 			padInfo.pszAlgId = BCRYPT_SHA1_ALGORITHM;
++ 			if ((hNCryptDLL = LoadLibrary("ncrypt.dll")) && (dfnNCryptSignHash = (DFNNCryptSignHash)GetProcAddress(hNCryptDLL, "NCryptSignHash"))) {
++ 				dfnNCryptSignHash(hCryptProvOrNCryptKey, &padInfo, bHash, 20, NULL, 0, &cbSig, BCRYPT_PAD_PKCS1);
++ 				if (!(win32ret = dfnNCryptSignHash(hCryptProvOrNCryptKey, &padInfo, bHash, 20, pbSig = snewn(cbSig, BYTE), cbSig, &cbSig, BCRYPT_PAD_PKCS1))) {
++ 					ret = bignum_from_bytes(pbSig, cbSig);
++ 				} else if (win32ret == NTE_SILENT_CONTEXT) {
++ 					ret = capi_rsa2_sign_2(rsa, data, datalen, FALSE);
++ 				}
++ 			}
++ 		}
++ 	}
++ 	if (pbSig) { sfree(pbSig); }
++ 	if (hHash) { CryptDestroyHash(hHash); }
++ 	if (pCertCtx) { CertFreeCertificateContext(pCertCtx); }
++ 	if (hCertStore) { CertCloseStore(hCertStore, CERT_CLOSE_STORE_FORCE_FLAG); }
++ 	if (hNCryptDLL) { FreeLibrary(hNCryptDLL); }
++ 	return ret ? ret : bignum_from_long(0);
++ }
++ 
++ /*
++  * Perform the signing operation.
++  */
++ Bignum capi_rsa2_sign(struct RSAKey *rsa, char *data, int datalen)
++ {
++ 	return capi_rsa2_sign_2(rsa, data, datalen, TRUE);
++ }
++ #endif /* USE_CAPI */
+diff -crNB putty-orig/windows/wincrypto.h putty-patch2/windows/wincrypto.h
+*** putty-orig/windows/wincrypto.h	Thu Jan  1 00:00:00 1970
+--- putty-patch2/windows/wincrypto.h	Tue Apr  3 20:54:04 2018
+***************
+*** 0 ****
+--- 1,5 ----
++ #ifdef USE_CAPI
++ void* capi_rsa2_sign(void *pRSAKeyStruct, char *data, int datalen);
++ int capi_is_capikey(void *pRSAKeyStruct);
++ void *capi_load_key(unsigned char **blob, int *len);
++ #endif /* USE_CAPI */
+diff -crNB putty-orig/windows/winpgnt.c putty-patch2/windows/winpgnt.c
+*** putty-orig/windows/winpgnt.c	Tue Apr  3 13:55:36 2018
+--- putty-patch2/windows/winpgnt.c	Tue Apr  3 21:19:50 2018
+***************
+*** 46,51 ****
+--- 46,54 ----
+  #define IDM_ADDKEY   0x0030
+  #define IDM_HELP     0x0040
+  #define IDM_ABOUT    0x0050
++ #ifdef USE_CAPI
++ #define IDM_ADDCERT  0x0070
++ #endif /* USE_CAPI */
+  
+  #define APPNAME "Pageant"
+  
+***************
+*** 466,471 ****
+--- 469,547 ----
+      return;
+  }
+  
++ #ifdef USE_CAPI
++ /*
++  * Add a key from a Windows certificate
++  */
++ static void prompt_add_capikey(void)
++ {
++ 	int ret;
++ 	char *err;
++ 	Filename *fn = filename_from_str("cert://*");
++ 	pageant_add_keyfile(fn, NULL, &err);
++ 	if (ret == PAGEANT_ACTION_OK) {
++ 		keylist_update();
++ 	} else {
++ 		message_box(err, APPNAME, MB_OK | MB_ICONERROR, HELPCTXID(errors_cantloadkey));
++ 	}
++ 	filename_free(fn);
++ 	sfree(err);
++ }
++ 
++ /*
++  * Copy key to clipboard in ssh authorized_keys format
++  */
++ static void key_to_clipboard2(struct ssh2_userkey *key)
++ {
++ 	unsigned char *pub_blob;
++ 	char *buffer, *p, *psz;
++ 	int pub_len, i;
++ 	HGLOBAL hClipBuffer;
++ 	
++ 	pub_blob = key->alg->public_blob(key->data, &pub_len);
++ 	buffer = snewn(strlen(key->alg->name) + 4 * ((pub_len + 2) / 3) + strlen(key->comment) + 3, char);
++ 	strcpy(buffer, key->alg->name);
++ 	p = buffer + strlen(buffer);
++ 	*p++ = ' ';
++ 	i = 0;
++ 	while(i < pub_len) {
++ 		int n = (pub_len - i < 3 ? pub_len - i : 3);
++ 		base64_encode_atom(pub_blob + i, n, p);
++ 		i += n;
++ 		p += 4;
++ 	}
++ 	*p++ = ' ';
++ 	strcpy(p, key->comment);
++ 	if(OpenClipboard(NULL)) {
++ 		hClipBuffer = GlobalAlloc(GMEM_MOVEABLE, strlen(buffer) + 1);
++ 		if(hClipBuffer) {
++ 			psz = (char *)GlobalLock(hClipBuffer);
++ 			strcpy(psz, buffer);
++ 			GlobalUnlock(hClipBuffer);
++ 			EmptyClipboard();
++ 			SetClipboardData(CF_TEXT, hClipBuffer);
++ 		}
++ 		CloseClipboard();
++ 	}
++ 	sfree(pub_blob);
++ 	sfree(buffer);
++ }
++ 
++ /*
++  * Copy 1'st selected key to clipboard in ssh authorized_keys format
++  */
++ static void key_to_clipboard(HWND hwnd)
++ {
++ 	int numSelected, *selectedArray;
++ 	if((numSelected = SendDlgItemMessage(hwnd, 100, LB_GETSELCOUNT, 0, 0)) > 0) {
++ 		selectedArray = snewn(numSelected, int);
++ 		SendDlgItemMessage(hwnd, 100, LB_GETSELITEMS, numSelected, (WPARAM)selectedArray);
++ 		key_to_clipboard2(pageant_nth_ssh2_key(selectedArray[0]));
++ 		sfree(selectedArray);
++ 	}
++ }
++ #endif /* USE_CAPI */
++ 
+  /*
+   * Prompt for a key file to add, and add it.
+   */
+***************
+*** 568,573 ****
+--- 644,656 ----
+  	    keylist = NULL;
+  	    DestroyWindow(hwnd);
+  	    return 0;
++ #ifdef USE_CAPI
++ 	  case 100:		       /* key list */
++ 		if(HIWORD(wParam) == LBN_DBLCLK) {
++ 			key_to_clipboard(hwnd);
++ 		}
++ 		return 0;
++ #endif /* USE_CAPI */
+  	  case 101:		       /* add key */
+  	    if (HIWORD(wParam) == BN_CLICKED ||
+  		HIWORD(wParam) == BN_DOUBLECLICKED) {
+***************
+*** 883,888 ****
+--- 966,976 ----
+  	    }
+  	    prompt_add_keyfile();
+  	    break;
++ #ifdef USE_CAPI
++ 	  case IDM_ADDCERT:
++ 		prompt_add_capikey();
++ 		break;
++ #endif /* USE_CAPI */
+  	  case IDM_ABOUT:
+  	    if (!aboutbox) {
+  		aboutbox = CreateDialog(hinst, MAKEINTRESOURCE(213),
+***************
+*** 1257,1262 ****
+--- 1345,1353 ----
+      AppendMenu(systray_menu, MF_ENABLED, IDM_VIEWKEYS,
+  	   "&View Keys");
+      AppendMenu(systray_menu, MF_ENABLED, IDM_ADDKEY, "Add &Key");
++ #ifdef USE_CAPI
++ 	AppendMenu(systray_menu, MF_ENABLED, IDM_ADDCERT, "Add &Certificate");
++ #endif /* USE_CAPI */
+      AppendMenu(systray_menu, MF_SEPARATOR, 0, 0);
+      if (has_help())
+  	AppendMenu(systray_menu, MF_ENABLED, IDM_HELP, "&Help");
